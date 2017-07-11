@@ -1,10 +1,16 @@
 -- by cybcaoyibo
 
-local meMain = "back"
+local meMain = "tileinterface_0"
+local teCobble = "tile_thermalexpansion_machine_extruder_name_0"
+local  mePulverizer = "tileinterface_0"
+local dirPulverizer = "east"
 
-local monitors = {}
+local monitors = {{name = "right", scale = 0.7}}
 
 local toStock = 4096
+local requestAmount = 32
+
+local patternDust = " Ore Dust$"
 
 local unpack = function(tab)
 	if table.unpack ~= nil then return table.unpack(tab) end
@@ -56,7 +62,7 @@ while true do
   
   -- Item Gathering
   
-  local rawItems = pc(meMain, "getAvailableItems")
+  local rawItems = pc(meMain, "getAvailableItems", "all")
   if rawItems == nil then
     print("getAvailableItems failed on meMain", colors.red)
     rawItems = {}
@@ -67,23 +73,18 @@ while true do
   local idMap = {}
   
   for _, rawItem in pairs(rawItems) do
-    local item = pc(meMain, "getItemDetail", rawItem.fingerprint)
+    local item = rawItem.item
     if item == nil then
-      print("getItemDetail failed on meMain", colors.red)
+      print("item doesn't have detail", colors.red)
+    elseif item.display_name == nil then
+      print("item doesn't have display_name", colors.red)
+    elseif item.id == nil then
+      print("item doesn't have id", colors.red)
     else
-      ok, item = pcall(item.all)
-      if not ok then
-        print("all() failed on item detail", colors.red)
-      elseif item.display_name == nil then
-        print("item doesn't have display_name", colors.red)
-      elseif item.id == nil then
-        print("item doesn't have id", colors.red)
-      else
-        item.identifier = rawItem.fingerprint
-        nameMap[item.display_name] = item
-        idMap[item.id] = item
-        table.insert(items, item)
-      end
+      item.identifier = rawItem.fingerprint
+      nameMap[item.display_name] = item
+      idMap[item.id] = item
+      table.insert(items, item)
     end
   end
   
@@ -109,9 +110,29 @@ while true do
   -- Cobblestone
   
   if getQty(nameMap["Cobblestone"]) < toStock then
-    pc("left", "setRedstoneControl", "disabled")
+    pc(teCobble, "setRedstoneControl", "disabled")
   else
-    pc("left", "setRedstoneControl", "high")
+    pc(teCobble, "setRedstoneControl", "high")
+  end
+  
+  -- Pulverizer
+  
+  do
+    local hasWork = false
+    for _, item in pairs(items) do
+      if item.qty > 0 and string.match(item.display_name, patternDust) ~= nil then
+        pushItem(mePulverizer, item, dirPulverizer, item.qty)
+        hasWork = true
+      end
+    end
+    if hasWork then
+    elseif getQty(nameMap["Gravel"]) < toStock then
+      pushItem(mePulverizer, nameMap["Cobblestone"], dirPulverizer, requestAmount)
+    elseif getQty(nameMap["Sand"]) < toStock then
+      pushItem(mePulverizer, nameMap["Gravel"], dirPulverizer, requestAmount)
+    elseif getQty(nameMap["Dust"]) < toStock then
+      pushItem(mePulverizer, nameMap["Sand"], dirPulverizer, requestAmount)
+    end
   end
   
   -- End of Cycle
