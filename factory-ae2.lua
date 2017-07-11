@@ -2,7 +2,9 @@
 
 local meMain = "back"
 
-local monitors = {{name = "left", scale = 0.5}}
+local monitors = {}
+
+local toStock = 4096
 
 local unpack = function(tab)
 	if table.unpack ~= nil then return table.unpack(tab) end
@@ -86,7 +88,7 @@ while true do
   end
   
   local pushItem = function(me, item, direction, qty, intoSlot)
-    if item == nil then return 0 end
+    if item == nil or item.qty <= 0 or qty <= 0 then return 0 end
     local result = pc(me, "exportItem", item.identifier, direction, qty, intoSlot)
     if result == nil then
       print("exportItem failed on " .. me, colors.red)
@@ -99,9 +101,18 @@ while true do
     end
   end
   
-  -- Test
+  local getQty = function(item)
+    if item == nil or item.qty <= 0 then return 0 end
+    return item.qty
+  end
   
-  pushItem("back", nameMap["Iron Ingot"], "west", 4)
+  -- Cobblestone
+  
+  if getQty(nameMap["Cobblestone"]) < toStock then
+    pc("left", "setRedstoneControl", "disabled")
+  else
+    pc("left", "setRedstoneControl", "high")
+  end
   
   -- End of Cycle
   
