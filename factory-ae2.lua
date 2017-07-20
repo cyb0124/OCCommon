@@ -1,6 +1,8 @@
 -- by cybcaoyibo
 
 local infMain            = "tileinterface_2"
+local infCleaver1        = "tileinterface_21"
+local dirCleaver1        = "west"
 local invCobbleGen       = "tile_extrautils_chestfull_name_0"
 local dirCobbleGen       = "up"
 local infPulverizer      = "tileinterface_3"
@@ -34,6 +36,9 @@ local invPureChamber     = "crafter_inventory_0"
 local infPureChamber     = "tileinterface_19"
 local dirPureChamberDust = "down"
 local dirPureChamberSeed = "east"
+local invBucket          = "crafter_inventory_1"
+local infBucket          = "tileinterface_20"
+local dirBucket          = "south"
 
 local monitors = {{name = "right", scale = 0.7}}
 
@@ -176,6 +181,48 @@ while true do
         itemDirt = item
       elseif item.id == "ThermalFoundation:material" and item.display_name == "Sulfur" then
         itemSulfur = item
+      end
+    end
+    
+    -- Cleaver 1
+    
+    do
+      local rawItems = pcLogErrorAndNil(infCleaver1, "getAvailableItems", "all")
+      if rawItems ~= nil then
+        local rawItemCleaver = nil
+        local dupCleaver = false
+        for _, v in pairs(rawItems) do
+          if rawItemCleaver == nil then
+            rawItemCleaver = v
+          else
+            dupCleaver = true
+            break
+          end
+        end
+        if dupCleaver then
+          print("More than 1 item in Cleaver 1", colors.red)
+        elseif rawItemCleaver == nil then
+          print("No item in Cleaver 1", colors.orange)
+        else
+          local itemCleaver = rawItemCleaver.item
+          if itemCleaver == nil then
+            print("Cleaver 1 item doesn't have detail", colors.red)
+          elseif itemCleaver.health_bar == nil then
+            print("Cleaver 1 item doesn't have damage bar", colors.orange)
+          else
+            local percentage = (1 - itemCleaver.health_bar) * 100
+            print("Cleaver 1 damage: " .. percentage .. "%", colors.blue)
+            if percentage < 50 then
+              print("Repairing Cleaver 1")
+              local result = pcLogErrorAndNil(infCleaver1, "exportItem", rawItemCleaver.fingerprint, dirCleaver1, 1)
+              if result ~= nil then
+                if result.size ~= 1 then
+                  print("Cleaver 1 repair export result size != 1", colors.red)
+                end
+              end
+            end
+          end
+        end
       end
     end
 
@@ -471,6 +518,29 @@ while true do
               if nSlots > 0 then
                 pushItem(infPureChamber, makings[1].input, dirPureChamberDust, amount)
                 pushItem(infPureChamber, itemSand, dirPureChamberDust, amount)
+              end
+            end
+          end
+        end
+      end
+    end
+  
+    -- Bucket
+    
+    do
+      if getQty(nameMap["Bucket"]) < 64 then
+        local itemIron = nameMap["Iron Ingot"]
+        local toUse = math.min(math.floor(getQty(itemIron) / 3), 8) * 3
+        if toUse > 0 then
+          local nSlots = pcLogErrorAndNil(invBucket, "getInventorySize")
+          if nSlots ~= nil then
+            local stacks = pcLogErrorAndNil(invBucket, "getAllStacks")
+            if stacks ~= nil then
+              for _, _ in pairs(stacks) do nSlots = nSlots - 1 end
+              nSlots = nSlots - 20
+              print("Bucket Crafter: " .. nSlots .. " free slots", colors.blue)
+              if nSlots > 0 then
+                pushItem(infBucket, itemIron, dirBucket, toUse)
               end
             end
           end
