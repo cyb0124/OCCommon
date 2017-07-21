@@ -1,8 +1,6 @@
 -- by cybcaoyibo
 
 local infMain            = "tileinterface_2"
-local infCleaver1        = "tileinterface_21"
-local dirCleaver1        = "west"
 local invCobbleGen       = "tile_extrautils_chestfull_name_0"
 local dirCobbleGen       = "up"
 local infPulverizer      = "tileinterface_3"
@@ -36,9 +34,13 @@ local invPureChamber     = "crafter_inventory_0"
 local infPureChamber     = "tileinterface_19"
 local dirPureChamberDust = "down"
 local dirPureChamberSeed = "east"
-local invBucket          = "crafter_inventory_1"
-local infBucket          = "tileinterface_20"
-local dirBucket          = "south"
+local invPaper           = "tile_thermalexpansion_machine_assembler_name_0"
+local infPaper           = "tileinterface_22"
+local dirPaper           = "down"
+local cleavers = {
+  {name = "Cursed Dirt Farm", inf = "tileinterface_21", dir = "west"},
+  {name = "Wither Skeleton Farm", inf = "tileinterface_24", dir = "down"}
+}
 
 local monitors = {{name = "right", scale = 0.7}}
 
@@ -184,10 +186,10 @@ while true do
       end
     end
     
-    -- Cleaver 1
+    -- Cleavers
     
-    do
-      local rawItems = pcLogErrorAndNil(infCleaver1, "getAvailableItems", "all")
+    for _, cfg in pairs(cleavers) do
+      local rawItems = pcLogErrorAndNil(cfg.inf, "getAvailableItems", "all")
       if rawItems ~= nil then
         local rawItemCleaver = nil
         local dupCleaver = false
@@ -200,24 +202,24 @@ while true do
           end
         end
         if dupCleaver then
-          print("More than 1 item in Cleaver 1", colors.red)
+          print("More than 1 item in " .. cfg.name, colors.red)
         elseif rawItemCleaver == nil then
-          print("No item in Cleaver 1", colors.orange)
+          print("No item in " .. cfg.name, colors.orange)
         else
           local itemCleaver = rawItemCleaver.item
           if itemCleaver == nil then
-            print("Cleaver 1 item doesn't have detail", colors.red)
+            print(cfg.name .. " item doesn't have detail", colors.red)
           elseif itemCleaver.health_bar == nil then
-            print("Cleaver 1 item doesn't have damage bar", colors.orange)
+            print(cfg.name .. " item doesn't have damage bar", colors.orange)
           else
             local percentage = (1 - itemCleaver.health_bar) * 100
-            print("Cleaver 1 damage: " .. percentage .. "%", colors.blue)
+            print(cfg.name .. " cleaver damage: " .. percentage .. "%", colors.blue)
             if percentage < 50 then
-              print("Repairing Cleaver 1")
-              local result = pcLogErrorAndNil(infCleaver1, "exportItem", rawItemCleaver.fingerprint, dirCleaver1, 1)
+              print("Repairing cleaver in " .. cfg.name)
+              local result = pcLogErrorAndNil(cfg.inf, "exportItem", rawItemCleaver.fingerprint, cfg.dir, 1)
               if result ~= nil then
                 if result.size ~= 1 then
-                  print("Cleaver 1 repair export result size != 1", colors.red)
+                  print(cfg.name .. "cleaver repair export result size != 1", colors.red)
                 end
               end
             end
@@ -269,8 +271,9 @@ while true do
           {input = nameMap["Coal"],          stock = getQty(itemSulfur)                    / 256  }
         }
         table.sort(makings, function(x, y) return x.stock < y.stock end)
-        if makings[1].stock < 1 then
-          pushItem(infPulverizer, makings[1].input, dirPulverizer, requestAmount)
+        for _, making in ipairs(makings) do
+          if making.stock >= 1 then break end
+          if pushItem(infPulverizer, making.input, dirPulverizer, requestAmount) > 0 then break end
         end
       end
     end
@@ -524,23 +527,23 @@ while true do
         end
       end
     end
-  
-    -- Bucket
+    
+    -- Paper
     
     do
-      if getQty(nameMap["Bucket"]) < 64 then
-        local itemIron = nameMap["Iron Ingot"]
-        local toUse = math.min(math.floor(getQty(itemIron) / 3), 8) * 3
-        if toUse > 0 then
-          local nSlots = pcLogErrorAndNil(invBucket, "getInventorySize")
+      if getQty(nameMap["Paper"]) < 4096 then
+        local itemSawDust = nameMap["Sawdust"]
+        local amount = math.min(math.floor(getQty(itemSawDust) / 4), requestAmount) * 4
+        if amount > 0 then
+          local nSlots = pcLogErrorAndNil(invPaper, "getInventorySize")
           if nSlots ~= nil then
-            local stacks = pcLogErrorAndNil(invBucket, "getAllStacks")
+            local stacks = pcLogErrorAndNil(invPaper, "getAllStacks")
             if stacks ~= nil then
               for _, _ in pairs(stacks) do nSlots = nSlots - 1 end
-              nSlots = nSlots - 20
-              print("Bucket Crafter: " .. nSlots .. " free slots", colors.blue)
+              nSlots = nSlots - 10
+              print("Paper Crafter: " .. nSlots .. " free slots", colors.blue)
               if nSlots > 0 then
-                pushItem(infBucket, itemIron, dirBucket, toUse)
+                pushItem(infPaper, itemSawDust, dirPaper, amount)
               end
             end
           end
