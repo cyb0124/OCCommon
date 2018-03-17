@@ -2,18 +2,18 @@
 --by cybcaoyibo
 
 local unpack = function(tab)
-	if table.unpack ~= nil then return table.unpack(tab) end
-	return _G.unpack(tab)
+  if table.unpack ~= nil then return table.unpack(tab) end
+  return _G.unpack(tab)
 end
 
 local pack = function(...)
-	return {...}
+  return {...}
 end
 
 local pc = function(...)
-	local rst = pack(pcall(peripheral.call, unpack({...})))
-	if rst[1] == false then return nil end
-	return select(2, unpack(rst))
+  local rst = pack(pcall(peripheral.call, unpack({...})))
+  if rst[1] == false then return nil end
+  return select(2, unpack(rst))
 end
 
 local round = function(num)
@@ -89,31 +89,31 @@ local control = function()
     pc(config.reactor, "setActive", true)
   end
   if out < 0 then out = 0 end
-  
+
   local nRods = pc(config.reactor, "getNumberOfControlRods")
   if nRods == nil then lastError = "nRods" return end
   local scaledOut = out * 100
   local nFine = round(scaledOut * nRods) - math.floor(scaledOut) * nRods
   local baseOut = math.floor(scaledOut)
-  
+
   local rodMap = {}
   for i = 1, nRods do
     rodMap[i] = i
   end
-  
+
   for i = 1, nRods - 1 do
     local with = math.random(i, nRods)
     local tmp = rodMap[i]
     rodMap[i] = rodMap[with]
     rodMap[with] = tmp
   end
-  
+
   for i = 1, nRods do
     local nowOut = baseOut
     if i <= nFine then nowOut = nowOut + 1 end
     pc(config.reactor, "setControlRodLevel", rodMap[i] - 1, nowOut)
   end
-  
+
   if hasTurbine then
     for i = 1, #(config.turbines) do
       local turbine = config.turbines[i]
@@ -126,7 +126,7 @@ local control = function()
       pc(turbine.name, "setInductorEngaged", state.engage)
     end
   end
-  
+
   for i = 1, #terms do
     local history = historyForTerm[i]
     table.insert(history, 1, {nowE = nowE, out = out, accum = accum})
@@ -166,7 +166,7 @@ local redraw = function()
       terms[i].setBackgroundColor(colors.black)
     end
     terms[i].write(toPercentage(tuning.kP))
-    
+
     -- kI
     terms[i].setCursorPos(8, 1)
     if selectedTuning == "kI" then
@@ -177,7 +177,7 @@ local redraw = function()
       terms[i].setBackgroundColor(colors.black)
     end
     terms[i].write(toPercentage(tuning.kI))
-    
+
     -- kD
     terms[i].setCursorPos(14, 1)
     if selectedTuning == "kD" then
@@ -188,7 +188,7 @@ local redraw = function()
       terms[i].setBackgroundColor(colors.black)
     end
     terms[i].write(toPercentage(tuning.kD))
-    
+
     -- ts
     terms[i].setCursorPos(20, 1)
     if selectedTuning == "ts" then
@@ -199,12 +199,12 @@ local redraw = function()
       terms[i].setBackgroundColor(colors.black)
     end
     terms[i].write(tostring(tuning.ts))
-    
+
     terms[i].setCursorPos(25, 1)
     terms[i].setTextColor(colors.white)
     terms[i].setBackgroundColor(colors.black)
     terms[i].write("br-ctrl by cybcaoyibo")
-    
+
     if lastError ~= nil then
       terms[i].setCursorPos(1, 2)
       terms[i].setTextColor(colors.white)
@@ -234,7 +234,7 @@ local redraw = function()
         terms[i].setBackgroundColor(colors.black)
         terms[i].write("PASSIVE")
       end
-      
+
       -- Chart
       local width, height = terms[i].getSize()
       if width ~= nil and height ~= nil then
@@ -260,7 +260,7 @@ local redraw = function()
           drawValue(x, accum * getI(), colors.red, "I")
           drawValue(x, -nowE, colors.lightBlue, "E")
         end
-        
+
         local history = historyForTerm[i]
         while #history > (width - turbineWidth) do table.remove(history) end
         for i = 1, #history do

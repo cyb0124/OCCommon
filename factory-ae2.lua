@@ -185,9 +185,9 @@ while true do
         itemSulfur = item
       end
     end
-    
+
     -- Cleavers
-    
+
     for _, cfg in pairs(cleavers) do
       local rawItems = pcLogErrorAndNil(cfg.inf, "getAvailableItems", "all")
       if rawItems ~= nil then
@@ -252,36 +252,30 @@ while true do
     -- Pulverizer
 
     do
-      local hasWork = false
       for _, item in pairs(items) do
         if item.qty > 0 and string.match(item.display_name, patternDust) ~= nil then
           pushItem(infPulverizer, item, dirPulverizer, item.qty)
-          hasWork = true
-          break
         end
       end
-      if not hasWork then
-        local makings = {
-          {input = nameMap["Cobblestone"],   stock = getQty(nameMap["Gravel"])             / 4096 },
-          {input = nameMap["Gravel"],        stock = getQty(nameMap["Sand"])               / 4096 },
-          {input = nameMap["Sand"],          stock = getQty(nameMap["Dust"])               / 4096 },
-          {input = nameMap["Nether Quartz"], stock = getQty(nameMap["Nether Quartz Dust"]) / 4096 },
-          {input = nameMap["Fluix Crystal"], stock = getQty(nameMap["Fluix Dust"])         / 4096 },
-          {input = nameMap["Oak Wood"],      stock = getQty(nameMap["Sawdust"])            / 4096 },
-          {input = nameMap["Coal"],          stock = getQty(itemSulfur)                    / 256  }
-        }
-        table.sort(makings, function(x, y) return x.stock < y.stock end)
-        for _, making in ipairs(makings) do
-          if making.stock >= 1 then break end
-          if pushItem(infPulverizer, making.input, dirPulverizer, requestAmount) > 0 then break end
-        end
+      local makings = {
+        {input = nameMap["Cobblestone"],   stock = getQty(nameMap["Gravel"])             / 4096 },
+        {input = nameMap["Gravel"],        stock = getQty(nameMap["Sand"])               / 4096 },
+        {input = nameMap["Sand"],          stock = getQty(nameMap["Dust"])               / 4096 },
+        {input = nameMap["Nether Quartz"], stock = getQty(nameMap["Nether Quartz Dust"]) / 4096 },
+        {input = nameMap["Fluix Crystal"], stock = getQty(nameMap["Fluix Dust"])         / 4096 },
+        {input = nameMap["Oak Wood"],      stock = getQty(nameMap["Sawdust"])            / 4096 },
+        {input = nameMap["Coal"],          stock = getQty(itemSulfur)                    / 256  }
+      }
+      table.sort(makings, function(x, y) return x.stock < y.stock end)
+      for _, making in ipairs(makings) do
+        if making.stock >= 1 then break end
+        if pushItem(infPulverizer, making.input, dirPulverizer, requestAmount) > 0 then break end
       end
     end
 
     -- Furnace
 
     do
-      local hasWork = false
       do
         local makings = {}
         for _, item in pairs(items) do
@@ -293,36 +287,34 @@ while true do
           end
         end
         table.sort(makings, function(x, y) return x.qty > y.qty end)
-        if #makings > 0 then
-          hasWork = true
-          pushItem(infFurnace, makings[1], dirFurnace, makings[1].qty)
+        for _, making in ipairs(makings) do
+          pushItem(infFurnace, making, dirFurnace, making.qty)
         end
       end
-      if not hasWork then
-        local getSiliconInput = function()
-          local possible = {
-            {item = nameMap["Certus Quartz Dust"]},
-            {item = nameMap["Nether Quartz Dust"]},
-            {item = nameMap["Sky Stone Dust"]}
-          }
-          table.sort(possible, function(x, y) return getQty(x.item) > getQty(y.item) end)
-          return possible[1].item
-        end
-        local makings = {
-          {input = nameMap["Sand"],        stock = getQty(nameMap["Glass"])         / 4096 },
-          {input = nameMap["Cobblestone"], stock = getQty(idMap["minecraft:stone"]) / 4096 },
-          {input = getSiliconInput,        stock = getQty(nameMap["Silicon"])       / 4096 },
-          {input = nameMap["Raw Rubber"],  stock = getQty(nameMap["Rubber Bar"])    / 4096 },
-          {input = nameMap["Rubber Bar"],  stock = getQty(nameMap["Raw Plastic"])   / 4096 },
-          {input = nameMap["Charcoal"],    stock = getQty(nameMap["Graphite Bar"])  / 4096 },
-          {input = nameMap["Oak Wood"],    stock = getQty(nameMap["Charcoal"])      / 4096 }
+      local getSiliconInput = function()
+        local possible = {
+          {item = nameMap["Certus Quartz Dust"]},
+          {item = nameMap["Nether Quartz Dust"]},
+          {item = nameMap["Sky Stone Dust"]}
         }
-        table.sort(makings, function(x, y) return x.stock < y.stock end)
-        if makings[1].stock < 1 then
-          local input = makings[1].input
-          if type(input) == "function" then input = input() end
-          pushItem(infFurnace, input, dirFurnace, requestAmount)
-        end
+        table.sort(possible, function(x, y) return getQty(x.item) > getQty(y.item) end)
+        return possible[1].item
+      end
+      local makings = {
+        {input = nameMap["Sand"],        stock = getQty(nameMap["Glass"])         / 4096 },
+        {input = nameMap["Cobblestone"], stock = getQty(idMap["minecraft:stone"]) / 4096 },
+        {input = getSiliconInput,        stock = getQty(nameMap["Silicon"])       / 4096 },
+        {input = nameMap["Raw Rubber"],  stock = getQty(nameMap["Rubber Bar"])    / 4096 },
+        {input = nameMap["Rubber Bar"],  stock = getQty(nameMap["Raw Plastic"])   / 4096 },
+        {input = nameMap["Charcoal"],    stock = getQty(nameMap["Graphite Bar"])  / 4096 },
+        {input = nameMap["Oak Wood"],    stock = getQty(nameMap["Charcoal"])      / 4096 }
+      }
+      table.sort(makings, function(x, y) return x.stock < y.stock end)
+      for _, making in ipairs(makings) do
+        if making.stock >= 1 then break end
+        local input = makings[1].input
+        if type(input) == "function" then input = input() end
+        if pushItem(infFurnace, input, dirFurnace, requestAmount) > 0 then break end
       end
     end
 
@@ -431,9 +423,9 @@ while true do
         end
       end
     end
-    
+
     -- Crop Farm
-    
+
     do
       local makings = {
         {input = nameMap["Seeds"], stock = getQty(nameMap["Wheat"]) / 4096 }
@@ -477,17 +469,17 @@ while true do
         pushItem(infFluix, input3, dirFluix, qty)
       end
     end
-    
+
     -- Saw
-    
+
     do
       if getQty(nameMap["Oak Wood Planks"]) < 4096 then
         pushItem(infSaw, nameMap["Oak Wood"], dirSaw, requestAmount)
       end
     end
-    
+
     -- Pure Chamber (Seed to Pure Crystal)
-    
+
     do
       local makings = {
         {item = nameMap["Certus Quartz Seed"]},
@@ -497,9 +489,9 @@ while true do
       table.sort(makings, function(x, y) return getQty(x.item) > getQty(y.item) end)
       pushItem(infPureChamber, makings[1].item, dirPureChamberSeed, getQty(makings[1].item))
     end
-    
+
     -- Pure Chamber (Dust to Seed)
-    
+
     do
       local makings = {
           {input = nameMap["Certus Quartz Dust"], stock = getQty(nameMap["Pure Certus Quartz Crystal"]) / 4096 },
@@ -527,9 +519,9 @@ while true do
         end
       end
     end
-    
+
     -- Paper
-    
+
     do
       if getQty(nameMap["Paper"]) < 4096 then
         local itemSawDust = nameMap["Sawdust"]
