@@ -1,7 +1,59 @@
-local computer = require "computer"
+local Dispatch = (function(signalHandler)
+  local Dispatch = {}
+  local evQueue = {}
+  local alarms = {}
+
+  Dispatch.queue = function(x)
+    table.insert(evQueue, x)
+  end
+
+  Dispatch.setAlarm = function(t1, f)
+    local alarm = {t1 = t1, f = f}
+    alarms[alarm] = true
+    return function()
+      alarm.f = nil
+    end
+  end
+
+  Dispatch.setTimer = function(td, f)
+    return Dispatch.setAlarm(computer.uptime() + td, f)
+  end
+
+  Dispatch.run = function(x)
+    while true do
+      local timeout = math.huge
+      local evQueueNow = evQueue
+      evQueue = {}
+      local alarmsNow = alarms
+      alarms = {}
+      for i = 1, #evQueueNow do
+        evQueueNow[i]()
+        timeout = 0
+      end
+      local now = computer.uptime()
+      for alarm, _ in pairs(alarmsNow) do
+        if alarm.f then
+          if alarm.t1 <= now then
+            alarm.f()
+            timeout = 0
+          else
+            alarms[alarm] = true
+            timeout = math.min(now - alarm.t1, timeout)
+          end
+        end
+      end
+      local result = {computer.pullSignal(timeout)}
+      if result[1] then
+        signalHandler(table.unpack(result))
+      end
+    end
+  end
+
+  return Dispatch
+end)
 
 local serpent = (function()
-  local n, v = "serpent", "0.301" -- (C) 2012-17 Paul Kulchenko; MIT License
+  local n, v = "serpent", "0.302" -- (C) 2012-18 Paul Kulchenko; MIT License
   local c, d = "Paul Kulchenko", "Lua serializer and pretty printer"
   local snum = {[tostring(1/0)]='1/0 --[[math.huge]]',[tostring(-1/0)]='-1/0 --[[-math.huge]]',[tostring(0/0)]='0/0'}
   local badtype = {thread = true, userdata = true, cdata = true}
@@ -92,7 +144,7 @@ local serpent = (function()
             local path = seen[t]..'['..tostring(seen[key] or globals[key] or gensym(key))..']'
             sref[#sref] = path..space..'='..space..tostring(seen[value] or val2str(value,nil,indent,path))
           else
-            out[#out+1] = val2str(value,key,indent,insref,seen[t],plainindex,level+1)
+            out[#out+1] = val2str(value,key,indent,nil,seen[t],plainindex,level+1)
             if maxlen then
               maxlen = maxlen - #out[#out]
               if maxlen < 0 then break end
@@ -142,189 +194,6 @@ local serpent = (function()
     line = function(a, opts) return s(a, merge({sortkeys = true, comment = true}, opts)) end,
     block = function(a, opts) return s(a, merge({indent = '  ', sortkeys = true, comment = true}, opts)) end }
 end)()
-
-local Dispatch = (function(signalHandler)
-  local Dispatch = {}
-  local evQueue = {}
-  local alarms = {}
-
-  Dispatch.queue = function(x)
-    table.insert(evQueue, x)
-  end
-
-  Dispatch.setAlarm = function(t1, f)
-    local alarm = {t1 = t1, f = f}
-    alarms[alarm] = true
-    return function()
-      alarm.f = nil
-    end
-  end
-
-  Dispatch.setTimer = function(td, f)
-    return Dispatch.setAlarm(computer.uptime() + td, f)
-  end
-
-  Dispatch.run = function(x)
-    while true do
-      local timeout = math.huge
-      local evQueueNow = evQueue
-      evQueue = {}
-      local alarmsNow = alarms
-      alarms = {}
-      for i = 1, #evQueueNow do
-        evQueueNow[i]()
-        timeout = 0
-      end
-      local now = computer.uptime()
-      for alarm, _ in pairs(alarmsNow) do
-        if alarm.f then
-          if alarm.t1 <= now then
-            alarm.f()
-            timeout = 0
-          else
-            alarms[alarm] = true
-            timeout = math.min(now - alarm.t1, timeout)
-          end
-        end
-      end
-      local result = {computer.pullSignal(timeout)}
-      if result[1] then
-        signalHandler(table.unpack(result))
-      end
-    end
-  end
-
-  return Dispatch
-end)
-
-local TIMEOUT = 1
-local NAGLING = 0.2
-local BUFFER  = 4096
-
-local Rx = function(dispatch, updateAckWnd, notify)
-  local Rx = {}
-  local seq = 0
-  local buf = ""
-  Rx.push = function(data)
-    if #data.dat > 0 then
-      local left = data.seq - seq
-      local right = math.min(left + #data.dat, BUFFER)
-      if left >= 0 and left <= #buf and right > #buf then
-        buf = string.sub(buf, 1, left) .. string.sub(data.dat, 1, right - left)
-        notify()
-      end
-      updateAckWnd(seq, BUFFER - #buf)
-    end
-  end
-  Rx.size = function()
-    return #buf
-  end
-  Rx.read = function(n)
-    local toRead = math.min(n, #buf)
-    if n > 0 then
-      local result = string.sub(buf, 1, toRead)
-      buf = string.sub(buf, toRead + 1)
-      seq = seq + toRead
-      updateAckWnd(seq, BUFFER - #buf)
-      return result
-    else
-      return ""
-    end
-  end
-  return Rx
-end
-
-local Tx = function(dispatch, push, done)
-  local Tx = {}
-  local seq = 0
-  local wnd = BUFFER
-  local unack = 0
-  local buf = ""
-  local myAck = 0
-  local myWnd = BUFFER
-  local nagleTimer, timeoutTimer
-  local transmit, timeout
-  transmit = function()
-    if not nagleTimer then
-      local newTimer
-      newTimer = dispatch.setTimer(NAGLING, function()
-        if nagleTimer == newTimer then
-          local len = math.min(#buf, wnd) - unack
-          push({
-            seq = seq + unack,
-            dat = string.sub(buf, unack + 1, unack + len),
-            ack = myAck,
-            wnd = myWnd
-          })
-          unack = unack + len
-          nagleTimer = nil
-          if len > 0 then
-            timeout()
-          end
-        end
-      end)
-      nagleTimer = newTimer
-    end
-  end
-  timeout = function()
-    if timeoutTimer then
-      timeoutTimer()
-    end
-    local newTimer
-    newTimer = dispatch.setTimer(TIMEOUT, function()
-      if timeoutTimer == newTimer then
-        unack = 0
-        transmit()
-        timeoutTimer = nil
-      end
-    end)
-    timeoutTimer = newTimer
-  end
-  Tx.push = function(data)
-    wnd = data.wnd
-    local maxAck = seq + math.min(wnd, unack)
-    if data.ack <= maxAck then
-      local increment = data.ack - seq
-      seq = seq + increment
-      unack = unack - increment
-      buf = string.sub(buf, increment + 1)
-      if #buf == 0 then
-        if timeoutTimer then
-          timeoutTimer()
-          timeoutTimer = nil
-        end
-        done()
-      else
-        timeout()
-      end
-    end
-    if #buf > unack and wnd >= unack then
-      transmit()
-    end
-  end
-  Tx.updateAckWnd = function(ack, wnd)
-    myAck = ack
-    myWnd = wnd
-    transmit()
-  end
-  Tx.send = function(data)
-    if #data > 0 then
-      buf = buf .. data
-      transmit()
-    end
-  end
-  Tx.close = function()
-    if nagleTimer then
-      nagleTimer()
-      nagleTimer = nil
-    end
-    if timeoutTimer then
-      timeoutTimer()
-      timeoutTimer = nil
-    end
-  end
-  return Tx
-end
 
 -- Assuming: serpent
 
@@ -387,13 +256,146 @@ local LpsParser = function(callback)
   return LpsParser
 end
 
-local HEARTBEAT_INTERVAL = 2
-local HEARTBEAT_TIMEOUT = 5
+local TIMEOUT = 3
+local NAGLING = 0
+local BUFFER  = 4096
+
+local Rx = function(dispatch, updateAckWnd, notify)
+  local Rx = {}
+  local seq = 0
+  local buf = ""
+  Rx.push = function(data)
+    if #data.dat > 0 then
+      local left = data.seq - seq
+      local right = math.min(left + #data.dat, BUFFER)
+      if left >= 0 and left <= #buf and right > #buf then
+        buf = string.sub(buf, 1, left) .. string.sub(data.dat, 1, right - left)
+        notify()
+      end
+      updateAckWnd(seq, BUFFER - #buf)
+    end
+  end
+  Rx.size = function()
+    return #buf
+  end
+  Rx.read = function(n)
+    local toRead = math.min(n, #buf)
+    if toRead > 0 then
+      local result = string.sub(buf, 1, toRead)
+      buf = string.sub(buf, toRead + 1)
+      seq = seq + toRead
+      updateAckWnd(seq, BUFFER - #buf)
+      return result
+    else
+      return ""
+    end
+  end
+  return Rx
+end
+
+local Tx = function(dispatch, push, done)
+  local Tx = {}
+  local seq = 0
+  local wnd = BUFFER
+  local unack = 0
+  local buf = ""
+  local myAck = 0
+  local myWnd = BUFFER
+  local nagleTimer, timeoutTimer
+  local transmit, timeout
+  transmit = function()
+    if not nagleTimer then
+      local newTimer
+      newTimer = dispatch.setTimer(NAGLING, function()
+        if nagleTimer == newTimer then
+          local len = math.min(#buf, wnd) - unack
+          push({
+            seq = seq + unack,
+            dat = string.sub(buf, unack + 1, unack + len),
+            ack = myAck,
+            wnd = myWnd
+          })
+          unack = unack + len
+          nagleTimer = nil
+          if len > 0 then
+            timeout()
+          end
+        end
+      end)
+      nagleTimer = newTimer
+    end
+  end
+  timeout = function()
+    if timeoutTimer then
+      timeoutTimer()
+    end
+    local newTimer
+    newTimer = dispatch.setTimer(TIMEOUT, function()
+      if timeoutTimer == newTimer then
+        unack = 0
+        transmit()
+        timeoutTimer = nil
+      end
+    end)
+    timeoutTimer = newTimer
+  end
+  Tx.push = function(data)
+    wnd = data.wnd
+    local maxAck = seq + math.min(wnd, unack)
+    if data.ack > seq and data.ack <= maxAck then
+      local increment = data.ack - seq
+      seq = seq + increment
+      unack = unack - increment
+      buf = string.sub(buf, increment + 1)
+      if #buf <= 0 then
+        if timeoutTimer then
+          timeoutTimer()
+          timeoutTimer = nil
+        end
+        done()
+      else
+        timeout()
+      end
+    end
+    if #buf > unack and wnd > unack then
+      transmit()
+    end
+  end
+  Tx.updateAckWnd = function(ack, wnd)
+    myAck = ack
+    myWnd = wnd
+    transmit()
+  end
+  Tx.send = function(data)
+    if #data > 0 then
+      buf = buf .. data
+      if wnd > unack then
+        transmit()
+      end
+    end
+  end
+  Tx.close = function()
+    if nagleTimer then
+      nagleTimer()
+      nagleTimer = nil
+    end
+    if timeoutTimer then
+      timeoutTimer()
+      timeoutTimer = nil
+    end
+  end
+  return Tx
+end
+
+local HEARTBEAT_INTERVAL = 10
+local HEARTBEAT_TIMEOUT = 15
+local CONNECT_TIMEOUT = 3
 
 -- Assuming: lpsDump, LpsParser, Rx, Tx
 -- callbacks: push, connected, error, packet
 
-local Peer = function(dispatch, callbacks, passive)
+local Peer = function(dispatch, callbacks, passive, connTimeoutOverride)
+  if not connTimeoutOverride then connTimeoutOverride = CONNECT_TIMEOUT end
   local Peer = {}
   local state
   local changeState = function(newState)
@@ -409,13 +411,26 @@ local Peer = function(dispatch, callbacks, passive)
   Peer.push = function(data)
     state.push(data)
   end
+  Peer.activeClose = function()
+    callbacks.push{rst = true}
+    Peer.close()
+  end
   local StateConnect, StateRun
   StateConnect = function()
     local state = {}
     local alive = true
     local timer
     state.push = function(data)
-      changeState(StateRun())
+      if data.rst then
+        dispatch.queue(function()
+          if alive then
+            Peer.close()
+            callbacks.error()
+          end
+        end)
+      else
+        changeState(StateRun())
+      end
     end
     state.close = function()
       if alive then
@@ -426,7 +441,7 @@ local Peer = function(dispatch, callbacks, passive)
     dispatch.queue(function()
       if alive then
         callbacks.push{}
-        timer = dispatch.setTimer(HEARTBEAT_TIMEOUT, function()
+        timer = dispatch.setTimer(connTimeoutOverride, function()
           if alive then
             Peer.close()
             callbacks.error()
@@ -475,11 +490,17 @@ local Peer = function(dispatch, callbacks, passive)
     end
     state.push = function(data)
       if alive then
-        rx.push(data)
+        if data.seq then
+          rx.push(data)
+          tx.push(data)
+        elseif data.rst then
+          Peer.close()
+          callbacks.error()
+        end
       end
     end
     lpsParser = LpsParser(function(packet)
-      if packet ~= "heartbeat" then
+      if not packet.heartbeat then
         dispatch.queue(function()
           if alive then
             callbacks.packet(packet)
@@ -492,7 +513,7 @@ local Peer = function(dispatch, callbacks, passive)
       local newTimer
       newTimer = dispatch.setTimer(HEARTBEAT_INTERVAL, function()
         if alive and heartbeatTimer == newTimer then
-          Peer.send("heartbeat")
+          Peer.send{heartbeat = true}
         end
       end)
       heartbeatTimer = newTimer
@@ -532,41 +553,259 @@ local Peer = function(dispatch, callbacks, passive)
   return Peer
 end
 
-local modem = component.modem
-modem.open(1)
-local peers = {}
-local dispatch
-dispatch = Dispatch(function(name, _, _, _, _, data)
-  if name == "modem_message" then
-    data = load(data)()
-    if data.to == "server" then
-      local peerName = data.from
-      if not peers[peerName] then
-        print(peerName .. " connected")
-        local peer
-        peer = Peer(dispatch, {
-          push = function(data)
-            data.from = "server"
-            data.to = peerName
-            modem.broadcast(1, serpent.dump(data))
-          end,
-          connected = function()
-            peer.send("hello from server")
-          end,
-          error = function()
-            print(peerName .. " disconnected")
-            peers[peerName] = nil
-          end,
-          packet = function(x)
-            print(peerName .. ": " .. serpent.line(x))
-          end
-        }, true)
-        peers[peerName] = peer
+local resolve = function(short)
+  for addr in component.list(short) do
+    return addr
+  end
+  for addr in component.list() do
+    if string.lower(string.sub(addr, 1, #short)) == string.lower(short) then
+      return addr
+    end
+  end
+end
+
+local cps = function(f)
+  return function(c, ...)
+    c(f(...))
+  end
+end
+
+local cpsThen = function(f, g)
+  return function(c)
+    f(function(...) g(c, ...) end)
+  end
+end
+
+local cpsChain = function(f, ...)
+  local fs = {...}
+  for i = 1, #fs do f = cpsThen(f, fs[i]) end
+  return f
+end
+
+local cpsAll = function(...)
+  local fs = {...}
+  return function(done, ...)
+    if #fs <= 0 then done{} return end
+    local nFinished, args, results = 0, {...}, {}
+    for i, f in ipairs(fs) do
+      f(function(...)
+        results[i] = {...}
+        nFinished = nFinished + 1
+        if nFinished >= #fs then
+          done(results)
+        end
+      end, table.unpack(args))
+    end
+  end
+end
+
+local cpsWrap = function(f)
+  return function(c, ...)
+    local co, resume = coroutine.create(f)
+    resume = function(...)
+      local result = {coroutine.resume(co, ...)}
+      if not result[1] then
+        error(result[2])
       else
-        peers[peerName].push(data)
+        if result[2] == "done" then
+          c(select(3, table.unpack(result)))
+        elseif result[2] == "then" then
+          result[3](resume, select(4, table.unpack(result)))
+        else
+          error "invalid yield"
+        end
+      end
+    end
+    resume(...)
+  end
+end
+
+-- Config
+
+local modem = component.proxy(resolve("modem"))
+local channel = 1
+local hostname = "lime"
+
+-- Networking
+
+if modem.setStrength then modem.setStrength(math.huge) end
+modem.open(channel)
+local iClients, IClient = {}
+local dispatch = Dispatch(function(kind, ...)
+  if kind == "modem_message" then
+    local data, remoteUUID, from, to = load(select(5, ...))(), (select(2, ...)), select(6, ...)
+    if to == hostname then
+      local client = iClients[from]
+      if client then
+        client.remoteUUID = remoteUUID
+        client.peer.push(data)
+      elseif data.seq then
+        modem.send(remoteUUID, channel, serpent.dump{rst = true}, hostname, from)
+      elseif not data.rst then
+        IClient(from, remoteUUID)
       end
     end
   end
 end)
+
+local HandlerCPS, cpsHandleInit = function(iClient, wrapped, cont)
+  local result, alive, recvBuffer, recvCont = {}, true, {}
+  result.close = function()
+    alive = false
+    if recvCont then
+      recvCont()
+    end
+  end
+  result.packet = function(p)
+    if alive then
+      if recvCont then
+        local cont = recvCont
+        recvCont = nil
+        cont(p)
+      else
+        table.insert(recvBuffer, p)
+      end
+    end
+  end
+  local callbacks = {
+    send = function(cont, p)
+      if alive then
+        iClient.peer.send(p)
+        cont(true)
+      else
+        cont(false)
+      end
+    end,
+    recv = function(cont)
+      if alive then
+        if #recvBuffer > 0 then
+          local p = table.remove(recvBuffer, 1)
+          if #recvBuffer <= 0 then recvBuffer = {} end
+          cont(p)
+        else
+          recvCont = cont
+        end
+      else
+        cont()
+      end
+    end,
+    close = function(cont)
+      if alive then
+        iClient.close()
+      end
+      cont()
+    end,
+    getFrom = function(cont)
+      cont(iClient.from)
+    end
+  }
+  local oldFinish = callbacks.finish
+  if wrapped then
+    local oldCallbacks = callbacks
+    callbacks = setmetatable({}, {__index = function(_, key)
+      return function(...)
+        return coroutine.yield("then", oldCallbacks[key], ...)
+      end
+    end})
+    cont = cpsWrap(cont)
+  end
+  dispatch.queue(function() cont(function()
+    if alive then
+      iClient.close()
+    end
+  end, callbacks) end)
+  return result
+end
+
+IClient = function(from, initRemoteUUID)
+  local result = {remoteUUID = initRemoteUUID, from = from}
+  result.close = function()
+    result.peer.activeClose()
+    result.changeHandler(nil)
+    iClients[from] = nil
+  end
+  result.changeHandler = function(newHandler)
+    if result.handler then result.handler.close() end
+    result.handler = newHandler
+  end
+  result.peer = Peer(dispatch, {
+    push = function(x)
+      modem.send(result.remoteUUID, channel, serpent.dump(x), hostname, from)
+    end,
+    connected = function()
+      result.changeHandler(HandlerCPS(result, true, cpsHandleInit))
+    end,
+    error = function()
+      result.changeHandler(nil)
+      iClients[from] = nil
+    end,
+    packet = function(p)
+      if result.handler then
+        result.handler.packet(p)
+      end
+    end
+  }, true)
+  iClients[from] = result
+end
+
+-- Inventory utils
+
+local forEachSlot = function(inv, side, f)
+  local stacks = inv.getAllStacks(side)
+  local count = stacks.count()
+  for slot = 1, count do
+    local item = stacks()
+    if item.name and item.size > 0 then
+      item.size = math.floor(item.size)
+      f(item, slot)
+    end
+  end
+  return count
+end
+
+-- Handlers
+
+local invCache = {}
+local getInv = function(invName)
+  if not invCache[invName] then
+    invCache[invName] = component.proxy(resolve(invName))
+  end
+  return invCache[invName]
+end
+
+local processGroup = function(ps)
+  local rs = {}
+  for i, p in ipairs(ps) do
+    if p.op == "list" then
+      local result = {}
+      forEachSlot(getInv(p.inv), p.side, function(item, slot)
+        item.slot = slot
+        table.insert(result, item)
+      end)
+      rs[i] = result
+    elseif p.op == "xfer" then
+      -- fromSide, toSide, [size, [fromSlot, [toSlot]]]
+      getInv(p.inv).transferItem(table.unpack(p.args))
+      rs[i] = {}
+    elseif p.op == "call" then
+      rs[i] = {getInv(p.inv)[p.fn](table.unpack(p.args))}
+    else
+      error("invalid op: " .. p.op)
+    end
+  end
+  return rs
+end
+
+cpsHandleInit = function(conn)
+  while true do
+    local p = conn.recv()
+    if not p then return "done" end
+    if p.ps then
+      conn.send(processGroup(p.ps))
+    else
+      conn.send(processGroup{p}[1])
+    end
+  end
+end
 
 dispatch.run()

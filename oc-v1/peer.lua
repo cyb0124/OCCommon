@@ -1,10 +1,12 @@
-local HEARTBEAT_INTERVAL = 2
-local HEARTBEAT_TIMEOUT = 5
+local HEARTBEAT_INTERVAL = 30
+local HEARTBEAT_TIMEOUT = 60
+local CONNECT_TIMEOUT = 2
 
 -- Assuming: lpsDump, LpsParser, Rx, Tx
 -- callbacks: push, connected, error, packet
 
-local Peer = function(dispatch, callbacks, passive)
+local Peer = function(dispatch, callbacks, passive, connTimeoutOverride)
+  if not connTimeoutOverride then connTimeoutOverride = CONNECT_TIMEOUT end
   local Peer = {}
   local state
   local changeState = function(newState)
@@ -20,13 +22,26 @@ local Peer = function(dispatch, callbacks, passive)
   Peer.push = function(data)
     state.push(data)
   end
+  Peer.activeClose = function()
+    callbacks.push{rst = true}
+    Peer.close()
+  end
   local StateConnect, StateRun
   StateConnect = function()
     local state = {}
     local alive = true
     local timer
     state.push = function(data)
-      changeState(StateRun())
+      if data.rst then
+        dispatch.queue(function()
+          if alive then
+            Peer.close()
+            callbacks.error()
+          end
+        end)
+      else
+        changeState(StateRun())
+      end
     end
     state.close = function()
       if alive then
@@ -37,7 +52,7 @@ local Peer = function(dispatch, callbacks, passive)
     dispatch.queue(function()
       if alive then
         callbacks.push{}
-        timer = dispatch.setTimer(HEARTBEAT_TIMEOUT, function()
+        timer = dispatch.setTimer(connTimeoutOverride, function()
           if alive then
             Peer.close()
             callbacks.error()
@@ -86,11 +101,17 @@ local Peer = function(dispatch, callbacks, passive)
     end
     state.push = function(data)
       if alive then
-        rx.push(data)
+        if data.seq then
+          rx.push(data)
+          tx.push(data)
+        elseif data.rst then
+          Peer.close()
+          callbacks.error()
+        end
       end
     end
     lpsParser = LpsParser(function(packet)
-      if packet ~= "heartbeat" then
+      if not packet.heartbeat then
         dispatch.queue(function()
           if alive then
             callbacks.packet(packet)
@@ -103,7 +124,7 @@ local Peer = function(dispatch, callbacks, passive)
       local newTimer
       newTimer = dispatch.setTimer(HEARTBEAT_INTERVAL, function()
         if alive and heartbeatTimer == newTimer then
-          Peer.send("heartbeat")
+          Peer.send{heartbeat = true}
         end
       end)
       heartbeatTimer = newTimer

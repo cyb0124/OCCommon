@@ -1,24 +1,93 @@
---big reactor controller script (for oc)
---by cybcaoyibo
+-- big reactor controller script (for oc)
+-- by cybcaoyibo
+-- Recommended parameters:
+-- Early: P=6400 I=5.5 D=0.8
+-- Mid:   P=1000 I=5.5 D=0.8
+-- Late:  P=100  I=5.5 D=0.8
+-- TS:    use the largest value without aliasing
 
-local event = require("event")
-local keyboard = require("keyboard")
-local shell = require("shell")
-local component = require("component")
-local computer = require("computer")
-
-local unpack = function(tab)
-  if table.unpack ~= nil then return table.unpack(tab) end
-  return _G.unpack(tab)
+local resolve = function(short)
+  for addr in component.list(short) do
+    return addr
+  end
+  for addr in component.list() do
+    if string.lower(string.sub(addr, 1, #short)) == string.lower(short) then
+      return addr
+    end
+  end
 end
 
-local pc = function(...)
-  local resolved = component.get(({...})[1])
-  if resolved == nil then return nil end
-  local rst = {pcall(component.invoke, resolved, select(2, ...))}
-  if rst[1] == false then return nil end
-  return select(2, unpack(rst))
+local config = {
+  gpus = {{proxy = component.proxy(resolve("gpu")), resolution = {160, 50}}},
+  reactor = "br_reactor",
+  tuningDisk = component.proxy(resolve("3a9")),
+  tuningName = "bigreactors-tuning.lua",
+  turbines = {
+    {addr = "000", rpm = 1800}
+  }
+}
+
+local pc = function(short, ...)
+  local resolved = resolve(short)
+  if not resolved then return end
+  local rst = {pcall(component.invoke, resolved, ...)}
+  if not rst[1] then return end
+  return select(2, table.unpack(rst))
 end
+
+local Dispatch = (function(signalHandler)
+  local Dispatch = {}
+  local evQueue = {}
+  local alarms = {}
+
+  Dispatch.queue = function(x)
+    table.insert(evQueue, x)
+  end
+
+  Dispatch.setAlarm = function(t1, f)
+    local alarm = {t1 = t1, f = f}
+    alarms[alarm] = true
+    return function()
+      alarm.f = nil
+    end
+  end
+
+  Dispatch.setTimer = function(td, f)
+    return Dispatch.setAlarm(computer.uptime() + td, f)
+  end
+
+  Dispatch.run = function(x)
+    while true do
+      local timeout = math.huge
+      local evQueueNow = evQueue
+      evQueue = {}
+      local alarmsNow = alarms
+      alarms = {}
+      for i = 1, #evQueueNow do
+        evQueueNow[i]()
+        timeout = 0
+      end
+      local now = computer.uptime()
+      for alarm, _ in pairs(alarmsNow) do
+        if alarm.f then
+          if alarm.t1 <= now then
+            alarm.f()
+            timeout = 0
+          else
+            alarms[alarm] = true
+            timeout = math.min(now - alarm.t1, timeout)
+          end
+        end
+      end
+      local result = {computer.pullSignal(timeout)}
+      if result[1] then
+        signalHandler(table.unpack(result))
+      end
+    end
+  end
+
+  return Dispatch
+end)
 
 local round = function(num)
   return math.floor(num + 0.5)
@@ -32,17 +101,12 @@ local toKB = function(num)
   return tostring(round(num / 1024))
 end
 
-local configPath = shell.resolve("br-config-oc.lua")
-local tuningPath = shell.resolve("br-tuning-oc.lua")
-
-local config = loadfile(configPath)()
-
 local getPV, hasTurbine
-if config.turbines == nil or #(config.turbines) == 0 then
+if not config.turbines or #(config.turbines) == 0 then
   hasTurbine = false
   getPV = function()
     local energy = pc(config.reactor, "getEnergyStored")
-    if energy == nil then return nil end
+    if not energy then return nil end
     return energy / 10000000
   end
 else
@@ -50,13 +114,24 @@ else
   getPV = function()
     local steam = pc(config.reactor, "getHotFluidAmount")
     local steamMax = pc(config.reactor, "getHotFluidAmountMax")
-    if steam == nil or steamMax == nil then return nil end
+    if not steam or not steamMax then return nil end
     return steam / steamMax
   end
 end
 
 local tuning
-local savedTuning = loadfile(tuningPath)
+local savedTuning = (function()
+  local fd = config.tuningDisk.open(config.tuningName, "r")
+  if not fd then return nil end
+  local buffer = ""
+  while true do
+    local now = config.tuningDisk.read(fd, 4096)
+    if not now then break end
+    buffer = buffer .. now
+  end
+  config.tuningDisk.close(fd)
+  return load(buffer)
+end)()
 if savedTuning ~= nil then
   tuning = savedTuning()
 else
@@ -64,9 +139,12 @@ else
 end
 
 local saveTuning = function()
-  local f = io.open(tuningPath, "w")
-  f:write("return {kP = " .. tuning.kP .. ", kI = " .. tuning.kI .. ", kD = " .. tuning.kD .. ", ts = " .. tuning.ts .. "}\n")
-  f:close()
+  local data = "return {kP = " .. tuning.kP .. ", kI = " .. tuning.kI .. ", kD = " .. tuning.kD .. ", ts = " .. tuning.ts .. "}\n"
+  local fd = config.tuningDisk.open(config.tuningName, "w")
+  if fd then
+    config.tuningDisk.write(fd, data)
+    config.tuningDisk.close(fd)
+  end
 end
 
 local getP = function() return tuning.kP end
@@ -82,7 +160,7 @@ local lastError = "INIT"
 local control = function()
   lastError = nil
   local pv = getPV()
-  if pv == nil then lastError = "PV" return end
+  if not pv then lastError = "PV" return end
   nowE = (0.5 - pv) * 2
   accum = accum + getTS() * nowE
   if accum > 1 / getI() then accum = 1 / getI()
@@ -100,7 +178,7 @@ local control = function()
   if out < 0 then out = 0 end
 
   local nRods = pc(config.reactor, "getNumberOfControlRods")
-  if nRods == nil then lastError = "nRods" return end
+  if not nRods then lastError = "nRods" return end
   local scaledOut = out * 100
   local nFine = round(scaledOut * nRods) - math.floor(scaledOut) * nRods
   local baseOut = math.floor(scaledOut)
@@ -130,7 +208,7 @@ local control = function()
       turbineStates[i] = state
       state.speed = pc(turbine.name, "getRotorSpeed")
       state.active = pc(turbine.name, "getActive")
-      if state.speed == nil or state.active == nil then lastError = "RPM#" .. tostring(i) return end
+      if not state.speed or not state.active then lastError = "RPM#" .. tostring(i) return end
       state.engage = state.speed >= turbine.rpm
       pc(turbine.name, "setInductorEngaged", state.engage)
     end
@@ -141,15 +219,15 @@ local gpus = {}
 local turbineWidth = 10
 
 for i = 1, #(config.gpus) do
-  local name = config.gpus[i].name
+  local proxy = config.gpus[i].proxy
   local resolution = config.gpus[i].resolution
 
   local bufferOld, bufferNew, nowFG, nowBG, lastFG, lastBG
-  local function newBuffer()
+  local newBuffer = function()
     local topBar = {}
     local rightBar = {}
     local leftBar = {}
-    local function base(x, y)
+    local base = function(x, y)
       if y == 1 then
         return topBar, (x - 1) * 3
       elseif x <= turbineWidth then
@@ -175,7 +253,7 @@ for i = 1, #(config.gpus) do
     }
   end
 
-  local function getMaxY(x)
+  local getMaxY = function(x)
     if x <= turbineWidth or x == resolution[1] then
       return resolution[2]
     else
@@ -183,7 +261,7 @@ for i = 1, #(config.gpus) do
     end
   end
 
-  local function clearBuffer(buffer)
+  local clearBuffer = function(buffer)
     for x = 1, resolution[1] do
       for y = 1, getMaxY(x) do
         buffer.set(x, y, " ", 0xFFFFFF, 0x000000)
@@ -191,7 +269,7 @@ for i = 1, #(config.gpus) do
     end
   end
 
-  local function swapBuffers()
+  local swapBuffers = function()
     local temp = bufferOld
     bufferOld = bufferNew
     bufferNew = temp
@@ -204,10 +282,10 @@ for i = 1, #(config.gpus) do
 
   table.insert(gpus, {
     reset = function()
-      pc(name, "setResolution", resolution[1], resolution[2])
-      pc(name, "setDepth", pc(name, "maxDepth"))
-      pc(name, "setBackground", 0x000000)
-      pc(name, "fill", 1, 1, resolution[1], resolution[2], " ")
+      proxy.setResolution(resolution[1], resolution[2])
+      proxy.setDepth(proxy.maxDepth())
+      proxy.setBackground(0x000000)
+      proxy.fill(1, 1, resolution[1], resolution[2], " ")
       lastBG = 0x000000
     end,
     startDraw = function()
@@ -232,9 +310,9 @@ for i = 1, #(config.gpus) do
     end,
     endDraw = function(scroll)
       if scroll then
-        pc(name, "copy", turbineWidth + 1, 2,
+        proxy.copy(turbineWidth + 1, 2,
           resolution[1] - turbineWidth, resolution[2] - 1, -1, 0)
-        pc(name, "copy", 1, 2, 1, resolution[2] - 1, turbineWidth - 1, 0)
+        proxy.copy(1, 2, 1, resolution[2] - 1, turbineWidth - 1, 0)
         for y = 2, resolution[2] do
           bufferOld.set(turbineWidth, y, bufferOld.get(1, y))
         end
@@ -246,13 +324,13 @@ for i = 1, #(config.gpus) do
           if cNew ~= cOld or fNew ~= fOld or bNew ~= bOld then
             if lastFG ~= fNew then
               lastFG = fNew
-              pc(name, "setForeground", lastFG)
+              proxy.setForeground(lastFG)
             end
             if lastBG ~= bNew then
               lastBG = bNew
-              pc(name, "setBackground", lastBG)
+              proxy.setBackground(lastBG)
             end
-            pc(name, "set", x, y, cNew)
+            proxy.set(x, y, cNew)
           end
         end
       end
@@ -260,14 +338,6 @@ for i = 1, #(config.gpus) do
     end
   })
 end
-
-local function resetGPUs()
-  for i = 1, #gpus do
-    gpus[i].reset()
-  end
-end
-
-resetGPUs()
 
 local redraw = function(scroll)
   for i = 1, #gpus do
@@ -314,7 +384,7 @@ local redraw = function(scroll)
 
     gpus[i].setForeground(0xFFFFFF)
     gpus[i].setBackground(0x000000)
-    gpus[i].set(25, 1, "br-ctrl by cybcaoyibo")
+    gpus[i].set(25, 1, "bigreactors-controller by cybcaoyibo")
 
     gpus[i].set(1, 2, toKB(computer.freeMemory())
       .. "/" .. toKB(computer.totalMemory()))
@@ -328,7 +398,7 @@ local redraw = function(scroll)
       if hasTurbine then
         for j = 1, #turbineStates do
           local xpos = 1
-          local function w(x)
+          local w = function(x)
             gpus[i].set(xpos, j + 2, x)
             xpos = xpos + #x
           end
@@ -375,40 +445,22 @@ local redraw = function(scroll)
   end
 end
 
-local timerFired = false
-local function onTimer()
-  timerFired = true
-  event.push("notify")
-end
-
-event.timer(getTS(), onTimer)
-redraw(false)
-
-while true do
-  local ev, eArg1, eArg2, eArg3 = event.pull()
-  if timerFired then
-    timerFired = false
-    event.timer(getTS(), onTimer)
-    control()
-    redraw(true)
-  end
-
+local dispatch
+dispatch = Dispatch(function(ev, kbdAddr, char, code, player)
   if ev == "key_down" then
-    if eArg3 == keyboard.keys.x then
-      break
-    elseif eArg3 == keyboard.keys.p then
+    if code == 0x19 then
       selectedTuning = "kP"
       redraw(false)
-    elseif eArg3 == keyboard.keys.i then
+    elseif code == 0x17 then
       selectedTuning = "kI"
       redraw(false)
-    elseif eArg3 == keyboard.keys.d then
+    elseif code == 0x20 then
       selectedTuning = "kD"
       redraw(false)
-    elseif eArg3 == keyboard.keys.t then
+    elseif code == 0x14 then
       selectedTuning = "ts"
       redraw(false)
-    elseif eArg3 == keyboard.keys.up then
+    elseif code == 0xC8 then
       if selectedTuning == "ts" then
         tuning.ts = tuning.ts + 1
         if tuning.ts > 20 then tuning.ts = 20 end
@@ -425,7 +477,7 @@ while true do
       end
       saveTuning()
       redraw(false)
-    elseif eArg3 == keyboard.keys.down then
+    elseif code == 0xD0 then
       if selectedTuning == "ts" then
         tuning.ts = tuning.ts - 1
         if tuning.ts < 1 then tuning.ts = 1 end
@@ -443,6 +495,25 @@ while true do
       redraw(false)
     end
   end
+end)
+
+local theTimer
+local setTimer
+setTimer = function()
+  local newTimer
+  newTimer = dispatch.setTimer(getTS(), function()
+    if theTimer == newTimer then
+      setTimer()
+      control()
+      redraw(true)
+    end
+  end)
+  theTimer = newTimer
 end
 
-resetGPUs()
+setTimer()
+for i = 1, #gpus do
+  gpus[i].reset()
+end
+redraw(false)
+dispatch.run()

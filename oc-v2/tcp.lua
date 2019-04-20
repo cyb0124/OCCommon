@@ -1,5 +1,5 @@
-local TIMEOUT = 1
-local NAGLING = 0.2
+local TIMEOUT = 3
+local NAGLING = 0
 local BUFFER  = 4096
 
 local Rx = function(dispatch, updateAckWnd, notify)
@@ -22,7 +22,7 @@ local Rx = function(dispatch, updateAckWnd, notify)
   end
   Rx.read = function(n)
     local toRead = math.min(n, #buf)
-    if n > 0 then
+    if toRead > 0 then
       local result = string.sub(buf, 1, toRead)
       buf = string.sub(buf, toRead + 1)
       seq = seq + toRead
@@ -84,12 +84,12 @@ local Tx = function(dispatch, push, done)
   Tx.push = function(data)
     wnd = data.wnd
     local maxAck = seq + math.min(wnd, unack)
-    if data.ack <= maxAck then
+    if data.ack > seq and data.ack <= maxAck then
       local increment = data.ack - seq
       seq = seq + increment
       unack = unack - increment
       buf = string.sub(buf, increment + 1)
-      if #buf == 0 then
+      if #buf <= 0 then
         if timeoutTimer then
           timeoutTimer()
           timeoutTimer = nil
@@ -99,7 +99,7 @@ local Tx = function(dispatch, push, done)
         timeout()
       end
     end
-    if #buf > unack and wnd >= unack then
+    if #buf > unack and wnd > unack then
       transmit()
     end
   end
@@ -111,7 +111,9 @@ local Tx = function(dispatch, push, done)
   Tx.send = function(data)
     if #data > 0 then
       buf = buf .. data
-      transmit()
+      if wnd > unack then
+        transmit()
+      end
     end
   end
   Tx.close = function()

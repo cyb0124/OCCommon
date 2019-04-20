@@ -1,0 +1,112 @@
+-- farmBot
+
+local FarmBot, farmBot
+FarmBot = (function()
+  local result, state, changeState, StateConnect, StateEstablished = {}
+  result.close = function()
+    changeState(nil)
+    farmBot = FarmBot()
+  end
+  result.cycle = function()
+    state.cycle()
+  end
+  changeState = function(newState)
+    if state then state.close() end
+    state = newState
+  end
+  StateConnect = function()
+    local state = {}
+    print("~farmBot", 0xffff00)
+    local client = Client "farmBot"
+    client.connected = function()
+      if not client then return end
+      print("+farmBot", 0x00ff00)
+      local movedClient = client
+      client = nil
+      changeState(StateEstablished(movedClient))
+    end
+    client.error = function()
+      if not client then return end
+      print("-farmBot", 0xff0000, 880)
+      client = nil
+      result.close()
+    end
+    state.close = function()
+      if not client then return end
+      client.activeClose()
+      client = nil
+    end
+    state.cycle = function(cont) cont() end
+    return state
+  end
+  StateEstablished = function(client)
+    local state, returnSlot, isAllocatingReturnSlot, inCycle, cycleSlot = {}
+    client.error = function()
+      if not client then return end
+      print("-farmBot", 0xff0000, 880)
+      client = nil
+      result.close()
+    end
+    client.packet = function(p)
+      if not client then return end
+      if p.op == "+return" then
+        if not returnSlot and not isAllocatingReturnSlot then
+          isAllocatingReturnSlot = true
+          busAllocate(function(slot)
+            if not client then busFree(slot) return end
+            isAllocatingReturnSlot = false
+            returnSlot = slot
+            client.send{op = "return", slot = returnSlot}
+          end)
+        end
+      elseif p.op == "-return" then
+        if returnSlot then
+          local item = inv.getStackInSlot(sideBus, returnSlot)
+          if item then
+            print("farmBot output: " .. item.label .. "*" .. math.floor(item.size))
+            transferItem(sideBus, sideME, item.size, returnSlot, 9)
+          end
+          busFree(returnSlot)
+          returnSlot = nil
+        end
+      end
+    end
+    state.close = function()
+      if not client then return end
+      client.activeClose()
+      if returnSlot then busFree(returnSlot) end
+      if cycleSlot then busFree(cycleSlot) end
+      if inCycle then inCycle() end
+      client, returnSlot, inCycle = nil
+    end
+    state.cycle = function(cont)
+      if not client or inCycle then cont() return end
+      local recipes = {
+        {i = "Oak Sapling",    o = "Oak Wood",       size = 4096},
+        {i = "Oak Sapling",    o = "Oak Sapling",    size = 64, s = true},
+        {i = "Oak Sapling",    o = "Apple",          size = 256},
+        {i = "Spruce Sapling", o = "Spruce Wood",    size = 4096},
+        {i = "Spruce Sapling", o = "Spruce Sapling", size = 64, s = true}
+      }
+      rankRecipes(recipes, function(recipe)
+        if recipe.s and recipe.demand > 0 then
+          recipe.demand = 2
+        end
+      end)
+      local recipe = recipes[1]
+      if recipe.demand <= 0 then
+        cont()
+      else
+        inCycle = cont
+        busAllocate(function(slot)
+          if not client or inCycle ~= cont then busFree(slot) return end
+          cycleSlot = slot
+          client.send{}
+        end)
+      end
+    end
+    return state
+  end
+  changeState(StateConnect())
+  return result
+end)

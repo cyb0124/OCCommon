@@ -17,8 +17,12 @@ local getEnergy = function()
   return computer.energy() / computer.maxEnergy()
 end
 
-local retrying = function(...)
-  while not ({...})[1](select(2, ...)) do
+local retrying = function(f, ...)
+  while true do
+    local result = {f(...)}
+    if result[1] then
+      return table.unpack(result)
+    end
     computer.beep(880)
   end
 end
@@ -87,46 +91,72 @@ while true do
   local t0 = computer.uptime()
 
   if getEnergy() < 0.2 then
-    scopedWalk("LFFFF", function()
+    scopedWalk("FFFFFF", function()
       while getEnergy() < 0.8 do sleep(0.2) end
     end)
   end
 
-  for i = 1, 16 do robot.suck(sides.front) end
+  for i = 1, 16 do robot.suck(sides.down) end
 
-  local slotsDamaged = {}
   local slotsBook = {}
   local slotsEnchanted = {}
+  local slotsDamaged = {}
+  local slotsPam = {}
   local slotsOther = {}
 
   for i = 1, 16 do
     local item = inv.getStackInInternalSlot(i)
     if item then
-      if item.maxDamage > 0 and item.damage > 0 then
-        table.insert(slotsDamaged, i)
-      elseif item.name == "minecraft:enchanted_book" then
+      if item.name == "minecraft:enchanted_book" then
         table.insert(slotsBook, i)
       elseif item.enchantments then
         table.insert(slotsEnchanted, i)
+      elseif item.maxDamage > 0 and item.damage > 0 then
+        table.insert(slotsDamaged, i)
+      elseif string.match(item.name, "^harvestcraft:")
+          and item.name ~= "harvestcraft:octopusrawitem"
+          and item.name ~= "harvestcraft:seaweeditem"
+          and item.name ~= "harvestcraft:eelrawitem" then
+        table.insert(slotsPam, i)
       else
         table.insert(slotsOther, i)
       end
     end
   end
 
-  local walkAndDrop = function(actions, slots)
-    scopedWalk(actions, function()
-      for _, i in pairs(slots) do
-        robot.select(i)
-        robot.drop(sides.front)
-      end
-    end)
+  local points = {}
+  local addPoint = function(location, slots)
+    if #slots > 0 then
+      table.insert(points, {location = location, action = function()
+        for _, i in pairs(slots) do
+          robot.select(i)
+          robot.drop(sides.down)
+        end
+      end})
+    end
   end
 
-  if #slotsOther > 0 then walkAndDrop("LFFR", slotsOther) end
-  if #slotsBook > 0 then walkAndDrop("LLFFLF", slotsBook) end
-  if #slotsEnchanted > 0 then walkAndDrop("LLFFR", slotsEnchanted) end
-  if #slotsDamaged > 0 then walkAndDrop("LLFFFFR", slotsDamaged) end
+  addPoint(1, slotsBook)
+  addPoint(2, slotsEnchanted)
+  addPoint(3, slotsDamaged)
+  addPoint(4, slotsPam)
+  addPoint(5, slotsOther)
 
-  waitUntil(t0 + 1)
+  local currentLocation = 0
+
+  while #points > 0 do
+    local point = points[1]
+    if currentLocation < point.location then
+      walk("F")
+      currentLocation = currentLocation + 1
+    else
+      point.action()
+      table.remove(points, 1)
+    end
+  end
+
+  while currentLocation > 0 do
+    walk("B")
+    currentLocation = currentLocation - 1
+  end
 end

@@ -1,4 +1,4 @@
-local robot = component.proxy(component.list("robot")())
+local robot = component.proxy(resolve("robot"))
 
 local walk = function(actions)
   for i = 1, #actions do
