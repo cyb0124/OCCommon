@@ -1,0 +1,12 @@
+﻿cmake_minimum_required(VERSION 2.8)
+cmake_policy(SET CMP0074 OLD)
+set(CMAKE_CXX_STANDARD 17)
+FIND_PACKAGE(Boost REQUIRED)
+INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIR})
+add_executable (OCServer Entry.cpp Server.cpp Server.h WeakCallback.h Destructible.h json.hpp)
+
+IF (WIN32)
+  add_definitions(-DBOOST_ALL_NO_LIB)
+  add_definitions(-D_WIN32_WINNT=0x0601)
+  target_link_libraries(OCServer ws2_32 mswsock)
+ENDIF ()
