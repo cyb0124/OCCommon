@@ -5,6 +5,7 @@
 #include <boost/asio.hpp>
 #include <boost/noncopyable.hpp>
 #include "json.hpp"
+#include "Actions.h"
 
 struct Server;
 struct Client;
@@ -27,10 +28,14 @@ private:
   boost::asio::ip::tcp::socket socket;
   std::optional<std::string> login;
   std::string logHeader;
+  std::list<std::vector<SharedAction>> sendQueue;
+  bool isSending = false;
+  std::list<SharedAction> responseQueue;
   void readLength();
   void readContent(size_t size);
   void onPacket(const char *data, size_t size);
   void onPacket(nlohmann::json&&);
+  void send();
 public:
   ~Client();
   Client(Server &s, boost::asio::ip::tcp::socket &&socket);
@@ -38,6 +43,7 @@ public:
   const Itr &getItr() const { return itr; }
   void init(const Itr&);
   void log(const std::string &message);
+  void enqueueActionGroup(std::vector<SharedAction> &group);
 };
 
 struct Server : std::enable_shared_from_this<Server> {
@@ -52,4 +58,6 @@ public:
   void init(uint16_t port);
   void updateLogin(Client &c);
   void removeClient(Client &c);
+  void enqueueActionGroup(const std::string &client, std::vector<SharedAction> &&group);
+  void enqueueAction(const std::string &client, const SharedAction &action);
 };

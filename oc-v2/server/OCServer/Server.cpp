@@ -3,11 +3,11 @@
 #include "WeakCallback.h"
 
 Server::Server(IOEnv &io)
-  :io(io), acceptor(io.io, boost::asio::ip::tcp::v4()) {}
+  :io(io), acceptor(io.io, boost::asio::ip::tcp::v6()) {}
 
 void Server::init(uint16_t port) {
   acceptor.set_option(boost::asio::ip::tcp::socket::reuse_address(true));
-  acceptor.bind({boost::asio::ip::address_v4::any(), port});
+  acceptor.bind({boost::asio::ip::address_v6::any(), port});
   acceptor.listen();
   startAccept();
 }
@@ -43,6 +43,24 @@ void Client::init(const Itr &x) {
 
 Client::~Client() {
   log("disconnected");
+
+  if (!sendQueue.empty()) {
+    s.io([sendQueue(std::move(sendQueue))]() {
+      for (auto &i : sendQueue) {
+        for (auto &j : i) {
+          j->onError();
+        }
+      }
+    });
+  }
+
+  if (!responseQueue.empty()) {
+    s.io([responseQueue(std::move(responseQueue))]() {
+      for (auto &i : responseQueue) {
+        i->onError();
+      }
+    });
+  }
 }
 
 void Client::log(const std::string &message) {
@@ -96,7 +114,13 @@ void Client::onPacket(const char *data, size_t size) {
 
 void Client::onPacket(nlohmann::json &&j) {
   if (login) {
-    // TODO:
+    if (responseQueue.empty()) {
+      log("unexpected packet");
+      s.removeClient(*this);
+    } else {
+      responseQueue.front()->onResponse(j);
+      responseQueue.pop_front();
+    }
   } else {
     login = j.get<std::string>();
     logHeader += "(" + *login + ")";
@@ -113,4 +137,61 @@ void Server::updateLogin(Client &c) {
     clients.erase(old->getItr());
     result.first->second = &c;
   }
+}
+
+void Server::enqueueAction(const std::string &client, const SharedAction &action) {
+  enqueueActionGroup(client, {action});
+}
+
+void Server::enqueueActionGroup(const std::string &client, std::vector<SharedAction> &&group) {
+  auto itr(logins.find(client));
+  if (itr == logins.end()) {
+    io([group(std::move(group))]() {
+      for (auto &i : group) {
+        i->onError();
+      }
+    });
+  } else {
+    itr->second->enqueueActionGroup(group);
+  }
+}
+
+void Client::send() {
+  if (isSending || sendQueue.empty())
+    return;
+  auto &head = sendQueue.front();
+  nlohmann::json j = nlohmann::json::array();
+  for (auto &i : head) {
+    j.emplace_back();
+    i->dump(j.back());
+  }
+  auto dumped(std::make_shared<std::string>(j.dump()));
+  size_t size = dumped->size();
+  if (size > 0xffffff) {
+    log("packet too large");
+    s.removeClient(*this);
+  }
+  auto len(std::make_shared<std::array<uint8_t, 3>>());
+  (*len)[0] = size & 0xffu;
+  (*len)[1] = size >> 8u & 0xffu;
+  (*len)[2] = size >> 16u & 0xffu;
+
+  isSending = true;
+  sendQueue.pop_front();
+  boost::asio::async_write(socket, std::vector<boost::asio::mutable_buffer>{boost::asio::buffer(*len), boost::asio::buffer(*dumped)},
+    makeWeakCallback(weak_from_this(), [this, len, dumped](const boost::system::error_code &ec, size_t) {
+      if (ec) {
+        log("error writing: " + ec.message());
+        s.removeClient(*this);
+      } else {
+        isSending = false;
+        send();
+      }
+    })
+  );
+}
+
+void Client::enqueueActionGroup(std::vector<SharedAction> &group) {
+  sendQueue.emplace_front(std::move(group));
+  send();
 }
