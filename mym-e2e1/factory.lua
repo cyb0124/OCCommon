@@ -1535,6 +1535,10 @@ local cycleCenter = proxyCycleTemplate("center", function(plan, preActions)
     {o = "Industrial Machine Chassis", size = 4, maxInproc = 4, is = {
       {item = "Simple Machine Chassis", size = 1},
       {item = "Industrial Dye Blend", size = 1}
+    }},
+    {o = "Signalum Cell Frame (Full)", size = 4, maxInproc = 40, is = {
+      {item = "Signalum Cell Frame (Empty)", size = 1},
+      {item = "Block of Redstone", size = 40}
     }}
   })
 
@@ -1618,7 +1622,7 @@ local cycleCenter = proxyCycleTemplate("center", function(plan, preActions)
     {o = "Block of Electrum", size = 4, maxInproc = 4, is = {
       {item = "Electrum Ingot", size = 9, slots = {1, 2, 3, 4, 5, 6, 7, 8, 9}}
     }},
-    {o = "Block of Redstone", size = 16, maxInproc = 7, is = {
+    {o = "Block of Redstone", size = 40, maxInproc = 7, is = {
       {item = "Redstone", size = 9, slots = {1, 2, 3, 4, 5, 6, 7, 8, 9}}
     }},
     {o = "Block of Lead", size = 16, maxInproc = 7, is = {
@@ -1812,6 +1816,13 @@ local cycleCenter = proxyCycleTemplate("center", function(plan, preActions)
       {item = "Infinity Bimetal Gear", size = 2, slots = {2, 8}},
       {item = "Hardened Cell Frame", size = 1, slots = {5}},
       {item = "Titanium Aluminide Plate", size = 4, slots = {1, 3, 7, 9}}
+    }},
+    {o = "Signalum Cell Frame (Empty)", size = 4, maxInproc = 4, is = {
+      {item = "Rosin", size = 2, slots = {4, 6}},
+      {item = "Reinforced Cell Frame (Full)", size = 1, slots = {5}},
+      {item = "Rich Slag", size = 1, slots = {2}},
+      {item = "Cinnabar", size = 1, slots = {8}},
+      {item = "Signalum Plate", size = 4, slots = {1, 3, 7, 9}}
     }}
   })
 
@@ -2183,6 +2194,7 @@ local cycleCenter = proxyCycleTemplate("center", function(plan, preActions)
     {o = "Tin Plate",                size = 64,  maxInproc = 16, i = "Tin Ingot"               },
     {o = "Copper Plate",             size = 64,  maxInproc = 16, i = "Copper Ingot"            },
     {o = "Invar Plate",              size = 16,  maxInproc = 16, i = "Invar Ingot"             },
+    {o = "Signalum Plate",           size = 16,  maxInproc = 16, i = "Signalum Ingot"          },
     {o = "Fluxed Electrum Plate",    size = 16,  maxInproc = 16, i = "Fluxed Electrum Ingot"   },
     {o = "Uranium Plate",            size = 4,   maxInproc = 16, i = "Uranium Ingot"           },
     {o = "Titanium Aluminide Plate", size = 4,   maxInproc = 16, i = "Titanium Aluminide Ingot"},
